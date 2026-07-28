@@ -1,0 +1,8 @@
+__pycache__
+*.mp4
+*.exe
+screenshots_gened/
+dist/
+build/
+.agents
+*.spec
