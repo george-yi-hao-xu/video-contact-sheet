@@ -1,4 +1,4 @@
-# py -m pip install opencv-python Pillow
+# py -m pip install -r requirements.txt
 
 from pathlib import Path
 
@@ -97,7 +97,7 @@ def make_contact_sheet(video_path, output_path):
     video = cv2.VideoCapture(str(video_path))
 
     if not video.isOpened():
-        print(f"无法打开：{video_path}")
+        print(f"无法打开 / Cannot open: {video_path}")
         return
 
     frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -106,7 +106,7 @@ def make_contact_sheet(video_path, output_path):
     fps = float(video.get(cv2.CAP_PROP_FPS))
 
     if frame_count <= 0 or source_width <= 0 or source_height <= 0:
-        print(f"无法读取视频信息：{video_path}")
+        print(f"无法读取视频信息 / Cannot read video info: {video_path}")
         video.release()
         return
 
@@ -146,7 +146,7 @@ def make_contact_sheet(video_path, output_path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(output_path, quality=90)
 
-    print(f"已生成：{output_path}")
+    print(f"已生成 / Generated: {output_path}")
 
 
 def get_output_path(current_folder, output_folder, video_path):
@@ -168,16 +168,16 @@ def main():
     ]
 
     if not videos:
-        print("当前目录下没有找到视频文件。")
+        print("当前目录下没有找到视频文件。/ No video files found in current folder.")
         return
 
-    print(f"找到 {len(videos)} 个视频。")
+    print(f"找到 {len(videos)} 个视频。/ Found {len(videos)} video(s).")
 
     for video_path in videos:
         output_path = get_output_path(current_folder, output_folder, video_path)
         make_contact_sheet(video_path, output_path)
 
-    print("全部完成。")
+    print("全部完成。/ All done.")
 
 
 if __name__ == "__main__":
