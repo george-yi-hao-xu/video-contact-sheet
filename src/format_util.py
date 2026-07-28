@@ -12,6 +12,20 @@ def format_duration(seconds):
     return f"{minutes:02d}:{seconds:02d}"
 
 
+def format_timestamp(seconds):
+    if seconds is None:
+        return "unknown"
+
+    seconds = max(0, round(seconds))
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    return f"{minutes:02d}:{seconds:02d}"
+
+
 def format_file_size(size):
     units = ["B", "KB", "MB", "GB", "TB"]
     value = float(size)

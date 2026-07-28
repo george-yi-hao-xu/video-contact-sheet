@@ -1,6 +1,6 @@
 # video-contact-sheet
 
-批量为当前文件夹下的视频生成 contact sheet 预览图。  
+批量为当前文件夹下的视频生成 contact sheet 预览图。
 Generate contact sheet preview images for videos in the current folder.
 
 ## 运行源码 / Run From Source
@@ -31,5 +31,5 @@ py -m PyInstaller --onefile --name video-contact-sheet .\main.py
 dist/video-contact-sheet.exe
 ```
 
-普通用户只需要运行 exe，不需要安装 Python 或依赖库。  
+普通用户只需要运行 exe，不需要安装 Python 或依赖库。
 End users only need the exe. Python and dependencies are not required.

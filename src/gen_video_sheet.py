@@ -6,12 +6,18 @@ from pathlib import Path
 import cv2
 from PIL import Image, ImageDraw, ImageFont
 
-from .format_util import format_duration, format_file_size
+from .format_util import format_duration, format_file_size, format_timestamp
 from .path_util import find_video_paths, get_output_path
 
 THUMB_WIDTH = 240
 HEADER_HEIGHT = 96
 HEADER_PADDING = 18
+THUMB_GAP = 2
+TIMESTAMP_FONT_SIZE = 18
+TIMESTAMP_MARGIN = 4
+TIMESTAMP_PADDING_X = 5
+TIMESTAMP_PADDING_Y = 3
+TIMESTAMP_BG = (70, 70, 70, 180)
 REPORT_FILENAME = "generation_report.txt"
 
 
@@ -65,6 +71,36 @@ def fit_text(draw, text, font, max_width):
             high = middle - 1
 
     return text[:low] + suffix
+
+
+def add_thumbnail_timestamp(thumbnail, timestamp):
+    base = thumbnail.convert("RGBA")
+    overlay = Image.new("RGBA", thumbnail.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    font = load_font(TIMESTAMP_FONT_SIZE, bold=True)
+    bbox = draw.textbbox((0, 0), timestamp, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    box_width = text_width + TIMESTAMP_PADDING_X * 2
+    box_height = text_height + TIMESTAMP_PADDING_Y * 2
+    box_x = TIMESTAMP_MARGIN
+    box_y = thumbnail.height - box_height - TIMESTAMP_MARGIN
+
+    draw.rectangle(
+        (box_x, box_y, box_x + box_width, box_y + box_height),
+        fill=TIMESTAMP_BG,
+    )
+    draw.text(
+        (
+            box_x + TIMESTAMP_PADDING_X - bbox[0],
+            box_y + TIMESTAMP_PADDING_Y - bbox[1],
+        ),
+        timestamp,
+        font=font,
+        fill=(255, 255, 255, 255),
+    )
+
+    return Image.alpha_composite(base, overlay).convert("RGB")
 
 
 def draw_video_info(sheet, video_path, frame_count, source_width, source_height, fps):
@@ -124,7 +160,10 @@ def make_contact_sheet(video_path, output_path):
 
     sheet = Image.new(
         "RGB",
-        (cols * THUMB_WIDTH, HEADER_HEIGHT + rows * thumb_height),
+        (
+            cols * THUMB_WIDTH + (cols + 1) * THUMB_GAP,
+            HEADER_HEIGHT + rows * thumb_height + (rows + 1) * THUMB_GAP,
+        ),
         "black",
     )
     draw_video_info(sheet, video_path, frame_count, source_width, source_height, fps)
@@ -145,9 +184,11 @@ def make_contact_sheet(video_path, output_path):
             continue
 
         thumbnail = resize_frame(frame, THUMB_WIDTH, thumb_height)
+        timestamp = format_timestamp(curr_frame_index / fps if fps > 0 else None)
+        thumbnail = add_thumbnail_timestamp(thumbnail, timestamp)
 
-        x = (index % cols) * THUMB_WIDTH
-        y = HEADER_HEIGHT + (index // cols) * thumb_height
+        x = THUMB_GAP + (index % cols) * (THUMB_WIDTH + THUMB_GAP)
+        y = HEADER_HEIGHT + THUMB_GAP + (index // cols) * (thumb_height + THUMB_GAP)
         sheet.paste(thumbnail, (x, y))
 
     video.release()
