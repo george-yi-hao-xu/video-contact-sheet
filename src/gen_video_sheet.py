@@ -271,14 +271,13 @@ def format_elapsed(seconds):
 
 
 def write_generation_report(
-    output_folder,
+    report_folder,
     completed_at,
     elapsed_seconds,
     total_count,
     success_count,
 ):
-    output_folder.mkdir(parents=True, exist_ok=True)
-    report_path = output_folder / REPORT_FILENAME
+    report_path = report_folder / REPORT_FILENAME
     failure_count = total_count - success_count
 
     lines = [
@@ -305,7 +304,7 @@ def main():
         print("No video files found in current folder.")
         completed_at = datetime.now().astimezone()
         elapsed_seconds = perf_counter() - started_at
-        write_generation_report(output_folder, completed_at, elapsed_seconds, 0, 0)
+        write_generation_report(current_folder, completed_at, elapsed_seconds, 0, 0)
         return
 
     print(f"Found {len(videos)} video(s).")
@@ -314,7 +313,7 @@ def main():
     completed_at = datetime.now().astimezone()
     elapsed_seconds = perf_counter() - started_at
     write_generation_report(
-        output_folder,
+        current_folder,
         completed_at,
         elapsed_seconds,
         len(videos),

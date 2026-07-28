@@ -16,7 +16,7 @@ py .\main.py
 screenshots_gened/
 ```
 
-The same folder also contains `generation_report.txt` with the generation time and video list.
+The root folder also contains `generation_report.txt` with the completion time and summary.
 
 ## 打包成 exe / Build exe
 
