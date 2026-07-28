@@ -1,6 +1,5 @@
-*
-!gen_video_sheet.py
-!format_util.py
-!README.md
-!requirements.txt
-!.gitignore
+__pycache__
+*.mp4
+*.exe
+screenshots_gened/
+dist/

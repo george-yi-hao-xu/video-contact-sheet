@@ -1,6 +1,6 @@
 def format_duration(seconds):
     if seconds <= 0:
-        return "未知时长"
+        return "unknown duration"
 
     seconds = round(seconds)
     hours, seconds = divmod(seconds, 3600)
@@ -22,7 +22,3 @@ def format_file_size(size):
                 return f"{int(value)} {unit}"
             return f"{value:.1f} {unit}"
         value /= 1024
-
-
-def format_output_name(relative_path):
-    return "__".join(relative_path.parts).replace(".", "_")

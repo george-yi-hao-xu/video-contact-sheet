@@ -1,24 +1,31 @@
 # py -m pip install -r requirements.txt
 
+from datetime import datetime
 from pathlib import Path
 
 import cv2
 from PIL import Image, ImageDraw, ImageFont
 
-from format_util import format_duration, format_file_size, format_output_name
+from .format_util import format_duration, format_file_size
+from .path_util import find_video_paths, get_output_path
 
-# 简单配置：需要调整时只改这里
-COLS = 10
-ROWS = 5
 THUMB_WIDTH = 240
 HEADER_HEIGHT = 96
 HEADER_PADDING = 18
+REPORT_FILENAME = "generation_report.txt"
 
-VIDEO_EXTENSIONS = {
-    ".mp4", ".mkv", ".avi", ".mov", ".wmv",
-    ".flv", ".webm", ".m4v", ".mpg", ".mpeg",
-    ".mts", ".m2ts", ".ts",
-}
+
+def get_sheet_grid(duration):
+    if duration <= 0:
+        return 6, 5
+
+    if duration < 15 * 60:
+        return 4, 3
+
+    if duration <= 60 * 60:
+        return 6, 5
+
+    return 8, 7
 
 
 def resize_frame(frame, width, height):
@@ -71,9 +78,9 @@ def draw_video_info(sheet, video_path, frame_count, source_width, source_height,
     try:
         file_size = format_file_size(video_path.stat().st_size)
     except OSError:
-        file_size = "未知大小"
+        file_size = "unknown size"
 
-    fps_text = f"{fps:.2f} fps" if fps > 0 else "未知 fps"
+    fps_text = f"{fps:.2f} fps" if fps > 0 else "unknown fps"
     title = fit_text(draw, video_path.name, title_font, max_text_width)
     info = fit_text(
         draw,
@@ -97,7 +104,7 @@ def make_contact_sheet(video_path, output_path):
     video = cv2.VideoCapture(str(video_path))
 
     if not video.isOpened():
-        print(f"无法打开 / Cannot open: {video_path}")
+        print(f"Cannot open: {video_path}")
         return
 
     frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -106,21 +113,23 @@ def make_contact_sheet(video_path, output_path):
     fps = float(video.get(cv2.CAP_PROP_FPS))
 
     if frame_count <= 0 or source_width <= 0 or source_height <= 0:
-        print(f"无法读取视频信息 / Cannot read video info: {video_path}")
+        print(f"Cannot read video info: {video_path}")
         video.release()
         return
 
-    total = COLS * ROWS
+    duration = frame_count / fps if fps > 0 else 0
+    cols, rows = get_sheet_grid(duration)
+    total = cols * rows
     thumb_height = round(THUMB_WIDTH * source_height / source_width)
 
     sheet = Image.new(
         "RGB",
-        (COLS * THUMB_WIDTH, HEADER_HEIGHT + ROWS * thumb_height),
+        (cols * THUMB_WIDTH, HEADER_HEIGHT + rows * thumb_height),
         "black",
     )
     draw_video_info(sheet, video_path, frame_count, source_width, source_height, fps)
 
-    # 均匀抽取 50 帧，并稍微避开开头和结尾
+    # Sample frames evenly and avoid the very beginning/end.
     start_fr_idx = int(frame_count * 0.02)
     end_fr_idx = int(frame_count * 0.98)
 
@@ -137,8 +146,8 @@ def make_contact_sheet(video_path, output_path):
 
         thumbnail = resize_frame(frame, THUMB_WIDTH, thumb_height)
 
-        x = (index % COLS) * THUMB_WIDTH
-        y = HEADER_HEIGHT + (index // COLS) * thumb_height
+        x = (index % cols) * THUMB_WIDTH
+        y = HEADER_HEIGHT + (index // cols) * thumb_height
         sheet.paste(thumbnail, (x, y))
 
     video.release()
@@ -146,39 +155,48 @@ def make_contact_sheet(video_path, output_path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(output_path, quality=90)
 
-    print(f"已生成 / Generated: {output_path}")
+    print(f"Generated: {output_path}")
 
 
-def get_output_path(current_folder, output_folder, video_path):
-    relative_path = video_path.relative_to(current_folder)
-    output_name = format_output_name(relative_path)
-    return output_folder / f"{output_name}.jpg"
+def write_generation_report(current_folder, output_folder, videos):
+    output_folder.mkdir(parents=True, exist_ok=True)
+    report_path = output_folder / REPORT_FILENAME
+    generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
+
+    lines = [
+        "Video Contact Sheet Generation Report",
+        f"Generated at: {generated_at}",
+        f"Video count: {len(videos)}",
+        "",
+        "Videos:",
+    ]
+
+    if videos:
+        lines.extend(
+            f"- {video_path.relative_to(current_folder)}" for video_path in videos
+        )
+    else:
+        lines.append("- No video files found.")
+
+    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Report written: {report_path}")
 
 
 def main():
     current_folder = Path.cwd()
     output_folder = current_folder / "screenshots_gened"
 
-    videos = [
-        path
-        for path in current_folder.rglob("*")
-        if path.is_file()
-        and path.suffix.lower() in VIDEO_EXTENSIONS
-        and output_folder not in path.parents #defensive: in case a video is in output folder
-    ]
+    videos = find_video_paths(current_folder, output_folder)
+    write_generation_report(current_folder, output_folder, videos)
 
     if not videos:
-        print("当前目录下没有找到视频文件。/ No video files found in current folder.")
+        print("No video files found in current folder.")
         return
 
-    print(f"找到 {len(videos)} 个视频。/ Found {len(videos)} video(s).")
+    print(f"Found {len(videos)} video(s).")
 
     for video_path in videos:
         output_path = get_output_path(current_folder, output_folder, video_path)
         make_contact_sheet(video_path, output_path)
 
-    print("全部完成。/ All done.")
-
-
-if __name__ == "__main__":
-    main()
+    print("All done.")

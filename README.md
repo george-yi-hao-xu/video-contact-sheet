@@ -7,7 +7,7 @@ Generate contact sheet preview images for videos in the current folder.
 
 ```powershell
 py -m pip install -r requirements.txt
-py .\gen_video_sheet.py
+py .\main.py
 ```
 
 生成的图片会放在 / Images will be saved to:
@@ -16,11 +16,13 @@ py .\gen_video_sheet.py
 screenshots_gened/
 ```
 
+The same folder also contains `generation_report.txt` with the generation time and video list.
+
 ## 打包成 exe / Build exe
 
 ```powershell
 py -m pip install -r requirements.txt
-py -m PyInstaller --onefile --name video-contact-sheet .\gen_video_sheet.py
+py -m PyInstaller --onefile --name video-contact-sheet .\main.py
 ```
 
 打包完成后，exe 在 / The built exe will be at:
