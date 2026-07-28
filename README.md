@@ -33,3 +33,9 @@ dist/video-contact-sheet.exe
 
 普通用户只需要运行 exe，不需要安装 Python 或依赖库。
 End users only need the exe. Python and dependencies are not required.
+
+## Download
+
+Windows users can download the prebuilt `.exe` here:
+
+[video-contact-sheet.exe](https://drive.google.com/file/d/10fkW-TlA1aRykcu9S89yvwxfMvky-bzO/view?usp=drive_link)
