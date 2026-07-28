@@ -1,5 +1,7 @@
 # py -m pip install -r requirements.txt
 
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +21,7 @@ TIMESTAMP_PADDING_X = 5
 TIMESTAMP_PADDING_Y = 3
 TIMESTAMP_BG = (70, 70, 70, 180)
 REPORT_FILENAME = "generation_report.txt"
+MAX_WORKERS = min(4, os.cpu_count() or 1)
 
 
 def get_sheet_grid(duration):
@@ -140,8 +143,7 @@ def make_contact_sheet(video_path, output_path):
     video = cv2.VideoCapture(str(video_path))
 
     if not video.isOpened():
-        print(f"Cannot open: {video_path}")
-        return
+        return False, f"Cannot open: {video_path}"
 
     frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
     source_width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -149,9 +151,8 @@ def make_contact_sheet(video_path, output_path):
     fps = float(video.get(cv2.CAP_PROP_FPS))
 
     if frame_count <= 0 or source_width <= 0 or source_height <= 0:
-        print(f"Cannot read video info: {video_path}")
         video.release()
-        return
+        return False, f"Cannot read video info: {video_path}"
 
     duration = frame_count / fps if fps > 0 else 0
     cols, rows = get_sheet_grid(duration)
@@ -196,7 +197,45 @@ def make_contact_sheet(video_path, output_path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(output_path, quality=90)
 
-    print(f"Generated: {output_path}")
+    return True, f"Generated: {output_path}"
+
+
+def process_video(args):
+    current_folder, output_folder, video_path = args
+
+    try:
+        cv2.setNumThreads(1)
+    except AttributeError:
+        pass
+
+    try:
+        output_path = get_output_path(current_folder, output_folder, video_path)
+        return make_contact_sheet(video_path, output_path)
+    except Exception as exc:
+        return False, f"Failed: {video_path} ({exc})"
+
+
+def get_worker_count(task_count):
+    return max(1, min(MAX_WORKERS, task_count))
+
+
+def generate_contact_sheets(current_folder, output_folder, videos):
+    worker_count = get_worker_count(len(videos))
+    print(f"Using {worker_count} worker process(es).")
+
+    tasks = [(current_folder, output_folder, video_path) for video_path in videos]
+    success_count = 0
+
+    with ProcessPoolExecutor(max_workers=worker_count) as executor:
+        futures = [executor.submit(process_video, task) for task in tasks]
+
+        for future in as_completed(futures):
+            success, message = future.result()
+            if success:
+                success_count += 1
+            print(message)
+
+    return success_count
 
 
 def write_generation_report(current_folder, output_folder, videos):
@@ -236,8 +275,6 @@ def main():
 
     print(f"Found {len(videos)} video(s).")
 
-    for video_path in videos:
-        output_path = get_output_path(current_folder, output_folder, video_path)
-        make_contact_sheet(video_path, output_path)
+    success_count = generate_contact_sheets(current_folder, output_folder, videos)
 
-    print("All done.")
+    print(f"All done. Generated {success_count}/{len(videos)} sheet(s).")
