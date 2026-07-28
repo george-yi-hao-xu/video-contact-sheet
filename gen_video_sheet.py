@@ -5,6 +5,8 @@ from pathlib import Path
 import cv2
 from PIL import Image, ImageDraw, ImageFont
 
+from format_util import format_duration, format_file_size, format_output_name
+
 # 简单配置：需要调整时只改这里
 COLS = 10
 ROWS = 5
@@ -56,32 +58,6 @@ def fit_text(draw, text, font, max_width):
             high = middle - 1
 
     return text[:low] + suffix
-
-
-def format_duration(seconds):
-    if seconds <= 0:
-        return "未知时长"
-
-    seconds = round(seconds)
-    hours, seconds = divmod(seconds, 3600)
-    minutes, seconds = divmod(seconds, 60)
-
-    if hours:
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
-    return f"{minutes:02d}:{seconds:02d}"
-
-
-def format_file_size(size):
-    units = ["B", "KB", "MB", "GB", "TB"]
-    value = float(size)
-
-    for unit in units:
-        if value < 1024 or unit == units[-1]:
-            if unit == "B":
-                return f"{int(value)} {unit}"
-            return f"{value:.1f} {unit}"
-        value /= 1024
 
 
 def draw_video_info(sheet, video_path, frame_count, source_width, source_height, fps):
@@ -175,7 +151,7 @@ def make_contact_sheet(video_path, output_path):
 
 def get_output_path(current_folder, output_folder, video_path):
     relative_path = video_path.relative_to(current_folder)
-    output_name = "__".join(relative_path.parts).replace(".", "_")
+    output_name = format_output_name(relative_path)
     return output_folder / f"{output_name}.jpg"
 
 
