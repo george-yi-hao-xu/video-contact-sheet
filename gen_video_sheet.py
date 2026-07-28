@@ -173,6 +173,12 @@ def make_contact_sheet(video_path, output_path):
     print(f"已生成：{output_path}")
 
 
+def get_output_path(current_folder, output_folder, video_path):
+    relative_path = video_path.relative_to(current_folder)
+    output_name = "__".join(relative_path.parts).replace(".", "_")
+    return output_folder / f"{output_name}.jpg"
+
+
 def main():
     current_folder = Path.cwd()
     output_folder = current_folder / "screenshots_gened"
@@ -192,13 +198,7 @@ def main():
     print(f"找到 {len(videos)} 个视频。")
 
     for video_path in videos:
-        relative_path = video_path.relative_to(current_folder)
-        output_path = (
-            output_folder
-            # / relative_path.parent
-            / f"{video_path.stem}.jpg"
-        )
-
+        output_path = get_output_path(current_folder, output_folder, video_path)
         make_contact_sheet(video_path, output_path)
 
     print("全部完成。")
