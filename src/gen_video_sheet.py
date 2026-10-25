@@ -1,16 +1,13 @@
 # py -m pip install -r requirements.txt
 
 import os
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from datetime import datetime
-from pathlib import Path
-from time import perf_counter
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from dataclasses import dataclass
 
 import cv2
 from PIL import Image, ImageDraw, ImageFont
 
 from .format_util import format_duration, format_file_size, format_timestamp
-from .path_util import find_video_paths, get_output_path
 
 THUMB_WIDTH = 240
 HEADER_HEIGHT = 96
@@ -21,11 +18,20 @@ TIMESTAMP_MARGIN = 4
 TIMESTAMP_PADDING_X = 5
 TIMESTAMP_PADDING_Y = 3
 TIMESTAMP_BG = (70, 70, 70, 180)
-REPORT_FILENAME = "generation_report.txt"
 MAX_WORKERS = min(4, os.cpu_count() or 1)
 
 
+@dataclass(frozen=True)
+class GenerationResult:
+    total_count: int
+    success_count: int
+    failure_count: int
+    canceled_count: int
+    failed_video_names: tuple[str, ...] = ()
+
+
 def get_sheet_grid(duration):
+    """Choose the thumbnail grid size based on video duration in seconds."""
     if duration <= 0:
         return 6, 5
 
@@ -39,12 +45,14 @@ def get_sheet_grid(duration):
 
 
 def resize_frame(frame, width, height):
+    """Convert an OpenCV BGR frame to RGB and resize it as a PIL image."""
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     image = Image.fromarray(frame)
     return image.resize((width, height), Image.Resampling.LANCZOS)
 
 
 def load_font(size, bold=False):
+    """Load a Windows font at the requested size, falling back safely."""
     candidates = [
         "C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc",
         "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
@@ -60,6 +68,7 @@ def load_font(size, bold=False):
 
 
 def fit_text(draw, text, font, max_width):
+    """Shorten text with an ellipsis until it fits within the given width."""
     if draw.textlength(text, font=font) <= max_width:
         return text
 
@@ -78,6 +87,7 @@ def fit_text(draw, text, font, max_width):
 
 
 def add_thumbnail_timestamp(thumbnail, timestamp):
+    """Draw a readable timestamp badge in the lower-left of a thumbnail."""
     base = thumbnail.convert("RGBA")
     overlay = Image.new("RGBA", thumbnail.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -108,6 +118,7 @@ def add_thumbnail_timestamp(thumbnail, timestamp):
 
 
 def draw_video_info(sheet, video_path, frame_count, source_width, source_height, fps):
+    """Draw the video name and technical details in the sheet header."""
     draw = ImageDraw.Draw(sheet)
     title_font = load_font(28, bold=True)
     info_font = load_font(20)
@@ -141,6 +152,11 @@ def draw_video_info(sheet, video_path, frame_count, source_width, source_height,
 
 
 def make_contact_sheet(video_path, output_path):
+    """Create and save one contact sheet from evenly sampled video frames.
+
+    The function returns a success flag and a user-facing result message rather
+    than raising errors for videos that cannot be opened or inspected.
+    """
     video = cv2.VideoCapture(str(video_path))
 
     if not video.isOpened():
@@ -170,23 +186,23 @@ def make_contact_sheet(video_path, output_path):
     )
     draw_video_info(sheet, video_path, frame_count, source_width, source_height, fps)
 
-    # Sample frames evenly and avoid the very beginning/end.
-    start_fr_idx = int(frame_count * 0.02)
-    end_fr_idx = int(frame_count * 0.98)
+    start_frame_index = int(frame_count * 0.02)
+    end_frame_index = int(frame_count * 0.98)
 
     for index in range(total):
-        curr_frame_index = round(
-            start_fr_idx + index * (end_fr_idx - start_fr_idx) / max(total - 1, 1)
+        current_frame_index = round(
+            start_frame_index
+            + index * (end_frame_index - start_frame_index) / max(total - 1, 1)
         )
 
-        video.set(cv2.CAP_PROP_POS_FRAMES, curr_frame_index)
+        video.set(cv2.CAP_PROP_POS_FRAMES, current_frame_index)
         success, frame = video.read()
 
         if not success:
             continue
 
         thumbnail = resize_frame(frame, THUMB_WIDTH, thumb_height)
-        timestamp = format_timestamp(curr_frame_index / fps if fps > 0 else None)
+        timestamp = format_timestamp(current_frame_index / fps if fps > 0 else None)
         thumbnail = add_thumbnail_timestamp(thumbnail, timestamp)
 
         x = THUMB_GAP + (index % cols) * (THUMB_WIDTH + THUMB_GAP)
@@ -201,8 +217,9 @@ def make_contact_sheet(video_path, output_path):
     return True, f"Generated: {output_path}"
 
 
-def process_video(args):
-    current_folder, output_folder, video_path = args
+def process_video(task):
+    """Process one source/output task and convert unexpected errors to failures."""
+    video_path, output_path = task
 
     try:
         cv2.setNumThreads(1)
@@ -210,56 +227,134 @@ def process_video(args):
         pass
 
     try:
-        output_path = get_output_path(current_folder, output_folder, video_path)
         return make_contact_sheet(video_path, output_path)
     except Exception as exc:
         return False, f"Failed: {video_path} ({exc})"
 
 
 def get_worker_count(task_count):
+    """Choose a safe worker count without exceeding tasks or the global limit."""
     return max(1, min(MAX_WORKERS, task_count))
 
 
-def run_tasks_sequentially(tasks):
+def _report_progress(progress_callback, completed_count, total_count, success, message):
+    """Send a progress update when the caller supplied a callback."""
+    if progress_callback:
+        progress_callback(completed_count, total_count, success, message)
+
+
+def _generate_sequentially(tasks, cancel_event, progress_callback):
+    """Process tasks one at a time until all finish or cancellation is requested."""
     success_count = 0
+    failure_count = 0
+    completed_count = 0
+    failed_video_names = []
 
     for task in tasks:
+        if cancel_event.is_set():
+            break
+
         success, message = process_video(task)
+        completed_count += 1
         if success:
             success_count += 1
-        print(message)
+        else:
+            failure_count += 1
+            failed_video_names.append(task[0].name)
+        _report_progress(
+            progress_callback,
+            completed_count,
+            len(tasks),
+            success,
+            message,
+        )
 
-    return success_count
+    return GenerationResult(
+        len(tasks),
+        success_count,
+        failure_count,
+        len(tasks) - completed_count,
+        tuple(failed_video_names),
+    )
 
 
-def generate_contact_sheets(current_folder, output_folder, videos):
-    worker_count = get_worker_count(len(videos))
-    print(f"Using {worker_count} worker(s).")
+def generate_contact_sheets(tasks, cancel_event, progress_callback=None):
+    """Generate contact sheets with bounded parallelism and safe cancellation.
 
-    tasks = [(current_folder, output_folder, video_path) for video_path in videos]
-    success_count = 0
+    Only enough tasks to fill the worker pool are submitted at once. After a
+    cancellation request, active tasks finish but no additional tasks start.
+    """
+    tasks = list(tasks)
+    if not tasks:
+        return GenerationResult(0, 0, 0, 0)
 
+    worker_count = get_worker_count(len(tasks))
     if worker_count == 1:
-        return run_tasks_sequentially(tasks)
+        return _generate_sequentially(tasks, cancel_event, progress_callback)
 
-    try:
-        with ProcessPoolExecutor(max_workers=worker_count) as executor:
-            futures = [executor.submit(process_video, task) for task in tasks]
+    success_count = 0
+    failure_count = 0
+    completed_count = 0
+    next_task_index = 0
+    failed_video_names = []
 
-            for future in as_completed(futures):
-                success, message = future.result()
+    with ProcessPoolExecutor(max_workers=worker_count) as executor:
+        active_futures = {}
+
+        while (
+            not cancel_event.is_set()
+            and next_task_index < len(tasks)
+            and len(active_futures) < worker_count
+        ):
+            future = executor.submit(process_video, tasks[next_task_index])
+            active_futures[future] = tasks[next_task_index]
+            next_task_index += 1
+
+        while active_futures:
+            completed_futures, _ = wait(active_futures, return_when=FIRST_COMPLETED)
+
+            for future in completed_futures:
+                video_path, _ = active_futures.pop(future)
+                try:
+                    success, message = future.result()
+                except Exception as exc:
+                    success = False
+                    message = f"Failed: {video_path} ({exc})"
+
+                completed_count += 1
                 if success:
                     success_count += 1
-                print(message)
-    except OSError as exc:
-        print(f"Multiprocessing unavailable ({exc}); falling back to sequential mode.")
-        return run_tasks_sequentially(tasks)
+                else:
+                    failure_count += 1
+                    failed_video_names.append(video_path.name)
+                _report_progress(
+                    progress_callback,
+                    completed_count,
+                    len(tasks),
+                    success,
+                    message,
+                )
 
+            while (
+                not cancel_event.is_set()
+                and next_task_index < len(tasks)
+                and len(active_futures) < worker_count
+            ):
+                future = executor.submit(process_video, tasks[next_task_index])
+                active_futures[future] = tasks[next_task_index]
+                next_task_index += 1
 
-    return success_count
+    return GenerationResult(
+        len(tasks),
+        success_count,
+        failure_count,
+        len(tasks) - completed_count,
+        tuple(failed_video_names),
+    )
 
 
 def format_elapsed(seconds):
+    """Format elapsed seconds as MM:SS or HH:MM:SS."""
     seconds = max(0, round(seconds))
     hours, seconds = divmod(seconds, 3600)
     minutes, seconds = divmod(seconds, 60)
@@ -270,54 +365,27 @@ def format_elapsed(seconds):
     return f"{minutes:02d}:{seconds:02d}"
 
 
-def write_generation_report(
-    report_folder,
+def format_generation_summary(
     completed_at,
     elapsed_seconds,
-    total_count,
-    success_count,
+    selected_count,
+    result,
+    skipped_count=0,
 ):
-    report_path = report_folder / REPORT_FILENAME
-    failure_count = total_count - success_count
-
+    """Format the completed generation results for display in the app."""
     lines = [
-        "Video Contact Sheet Generation Report",
+        "Generation Summary",
         f"Completed at: {completed_at.isoformat(timespec='seconds')}",
         f"Elapsed time: {format_elapsed(elapsed_seconds)}",
-        f"Total videos: {total_count}",
-        f"Succeeded: {success_count}",
-        f"Failed: {failure_count}",
+        f"Selected videos: {selected_count}",
+        f"Succeeded: {result.success_count}",
+        f"Failed: {result.failure_count}",
+        f"Skipped: {skipped_count}",
+        f"Canceled: {result.canceled_count}",
     ]
 
-    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"Report written: {report_path}")
+    if result.failed_video_names:
+        lines.extend(["", "Failed videos:"])
+        lines.extend(f"- {name}" for name in result.failed_video_names)
 
-
-def main():
-    started_at = perf_counter()
-    current_folder = Path.cwd()
-    output_folder = current_folder / "screenshots_gened"
-
-    videos = find_video_paths(current_folder, output_folder)
-
-    if not videos:
-        print("No video files found in current folder.")
-        completed_at = datetime.now().astimezone()
-        elapsed_seconds = perf_counter() - started_at
-        write_generation_report(current_folder, completed_at, elapsed_seconds, 0, 0)
-        return
-
-    print(f"Found {len(videos)} video(s).")
-
-    success_count = generate_contact_sheets(current_folder, output_folder, videos)
-    completed_at = datetime.now().astimezone()
-    elapsed_seconds = perf_counter() - started_at
-    write_generation_report(
-        current_folder,
-        completed_at,
-        elapsed_seconds,
-        len(videos),
-        success_count,
-    )
-
-    print(f"All done. Generated {success_count}/{len(videos)} sheet(s).")
+    return "\n".join(lines)
