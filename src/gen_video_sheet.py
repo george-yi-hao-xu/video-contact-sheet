@@ -33,6 +33,7 @@ class GenerationResult:
 
 
 def get_sheet_grid(duration):
+    """Choose the thumbnail grid size based on video duration in seconds."""
     if duration <= 0:
         return 6, 5
 
@@ -46,12 +47,14 @@ def get_sheet_grid(duration):
 
 
 def resize_frame(frame, width, height):
+    """Convert an OpenCV BGR frame to RGB and resize it as a PIL image."""
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     image = Image.fromarray(frame)
     return image.resize((width, height), Image.Resampling.LANCZOS)
 
 
 def load_font(size, bold=False):
+    """Load a Windows font at the requested size, falling back safely."""
     candidates = [
         "C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc",
         "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
@@ -67,6 +70,7 @@ def load_font(size, bold=False):
 
 
 def fit_text(draw, text, font, max_width):
+    """Shorten text with an ellipsis until it fits within the given width."""
     if draw.textlength(text, font=font) <= max_width:
         return text
 
@@ -85,6 +89,7 @@ def fit_text(draw, text, font, max_width):
 
 
 def add_thumbnail_timestamp(thumbnail, timestamp):
+    """Draw a readable timestamp badge in the lower-left of a thumbnail."""
     base = thumbnail.convert("RGBA")
     overlay = Image.new("RGBA", thumbnail.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -115,6 +120,7 @@ def add_thumbnail_timestamp(thumbnail, timestamp):
 
 
 def draw_video_info(sheet, video_path, frame_count, source_width, source_height, fps):
+    """Draw the video name and technical details in the sheet header."""
     draw = ImageDraw.Draw(sheet)
     title_font = load_font(28, bold=True)
     info_font = load_font(20)
@@ -148,6 +154,11 @@ def draw_video_info(sheet, video_path, frame_count, source_width, source_height,
 
 
 def make_contact_sheet(video_path, output_path):
+    """Create and save one contact sheet from evenly sampled video frames.
+
+    The function returns a success flag and a user-facing result message rather
+    than raising errors for videos that cannot be opened or inspected.
+    """
     video = cv2.VideoCapture(str(video_path))
 
     if not video.isOpened():
@@ -209,6 +220,7 @@ def make_contact_sheet(video_path, output_path):
 
 
 def process_video(task):
+    """Process one source/output task and convert unexpected errors to failures."""
     video_path, output_path = task
 
     try:
@@ -223,15 +235,18 @@ def process_video(task):
 
 
 def get_worker_count(task_count):
+    """Choose a safe worker count without exceeding tasks or the global limit."""
     return max(1, min(MAX_WORKERS, task_count))
 
 
 def _report_progress(progress_callback, completed_count, total_count, success, message):
+    """Send a progress update when the caller supplied a callback."""
     if progress_callback:
         progress_callback(completed_count, total_count, success, message)
 
 
 def _generate_sequentially(tasks, cancel_event, progress_callback):
+    """Process tasks one at a time until all finish or cancellation is requested."""
     success_count = 0
     failure_count = 0
     completed_count = 0
@@ -263,6 +278,11 @@ def _generate_sequentially(tasks, cancel_event, progress_callback):
 
 
 def generate_contact_sheets(tasks, cancel_event, progress_callback=None):
+    """Generate contact sheets with bounded parallelism and safe cancellation.
+
+    Only enough tasks to fill the worker pool are submitted at once. After a
+    cancellation request, active tasks finish but no additional tasks start.
+    """
     tasks = list(tasks)
     if not tasks:
         return GenerationResult(0, 0, 0, 0)
@@ -330,6 +350,7 @@ def generate_contact_sheets(tasks, cancel_event, progress_callback=None):
 
 
 def format_elapsed(seconds):
+    """Format elapsed seconds as MM:SS or HH:MM:SS."""
     seconds = max(0, round(seconds))
     hours, seconds = divmod(seconds, 3600)
     minutes, seconds = divmod(seconds, 60)
@@ -348,6 +369,7 @@ def write_generation_report(
     result,
     skipped_count=0,
 ):
+    """Write a UTF-8 text report summarizing the completed generation run."""
     report_path = Path(report_folder) / REPORT_FILENAME
 
     lines = [

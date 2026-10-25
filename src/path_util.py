@@ -1,18 +1,33 @@
+from collections.abc import Iterable
+from os import PathLike
 from pathlib import Path
 
 
-VIDEO_EXTENSIONS = {
+PathInput = str | PathLike[str]
+
+
+VIDEO_EXTENSIONS: set[str] = {
     ".mp4", ".mkv", ".avi", ".mov", ".wmv",
     ".flv", ".webm", ".m4v", ".mpg", ".mpeg",
     ".mts", ".m2ts", ".ts",
 }
 
 
-def is_video_file(path):
+def is_video_file(path: Path) -> bool:
+    """Return whether a path points to a supported video file."""
     return path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
 
 
-def find_video_paths(input_folder, output_folder=None, recursive=True):
+def find_video_paths(
+    input_folder: PathInput,
+    output_folder: PathInput | None = None,
+    recursive: bool = True,
+) -> list[Path]:
+    """Find supported videos in a folder, optionally searching subfolders.
+
+    Videos located inside the output folder are excluded so generated files or
+    copied source videos are not accidentally processed again.
+    """
     input_folder = Path(input_folder)
     output_folder = Path(output_folder).resolve() if output_folder else None
     candidates = input_folder.rglob("*") if recursive else input_folder.iterdir()
@@ -34,11 +49,22 @@ def find_video_paths(input_folder, output_folder=None, recursive=True):
     return sorted(videos, key=lambda path: str(path).lower())
 
 
-def format_output_name(relative_path):
+def format_output_name(relative_path: Path) -> str:
+    """Flatten a relative source path into a safe contact-sheet filename stem."""
     return "__".join(relative_path.parts).replace(".", "_")
 
 
-def plan_output_tasks(video_paths, output_folder, input_folder=None):
+def plan_output_tasks(
+    video_paths: Iterable[PathInput],
+    output_folder: PathInput,
+    input_folder: PathInput | None = None,
+) -> list[tuple[Path, Path]]:
+    """Pair each source video with a unique JPEG path in the output folder.
+
+    Folder selections retain their relative path in flattened form. Individual
+    file selections use only the source filename. Numeric suffixes prevent two
+    selected videos from being assigned the same output path.
+    """
     output_folder = Path(output_folder)
     input_folder = Path(input_folder) if input_folder else None
     reserved_names = set()
