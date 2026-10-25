@@ -6,3 +6,4 @@ dist/
 build/
 .agents
 *.spec
+generation_report.txt
