@@ -3,8 +3,6 @@
 import os
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
 
 import cv2
 from PIL import Image, ImageDraw, ImageFont
@@ -20,7 +18,6 @@ TIMESTAMP_MARGIN = 4
 TIMESTAMP_PADDING_X = 5
 TIMESTAMP_PADDING_Y = 3
 TIMESTAMP_BG = (70, 70, 70, 180)
-REPORT_FILENAME = "generation_report.txt"
 MAX_WORKERS = min(4, os.cpu_count() or 1)
 
 
@@ -30,6 +27,7 @@ class GenerationResult:
     success_count: int
     failure_count: int
     canceled_count: int
+    failed_video_names: tuple[str, ...] = ()
 
 
 def get_sheet_grid(duration):
@@ -250,6 +248,7 @@ def _generate_sequentially(tasks, cancel_event, progress_callback):
     success_count = 0
     failure_count = 0
     completed_count = 0
+    failed_video_names = []
 
     for task in tasks:
         if cancel_event.is_set():
@@ -261,6 +260,7 @@ def _generate_sequentially(tasks, cancel_event, progress_callback):
             success_count += 1
         else:
             failure_count += 1
+            failed_video_names.append(task[0].name)
         _report_progress(
             progress_callback,
             completed_count,
@@ -274,6 +274,7 @@ def _generate_sequentially(tasks, cancel_event, progress_callback):
         success_count,
         failure_count,
         len(tasks) - completed_count,
+        tuple(failed_video_names),
     )
 
 
@@ -295,6 +296,7 @@ def generate_contact_sheets(tasks, cancel_event, progress_callback=None):
     failure_count = 0
     completed_count = 0
     next_task_index = 0
+    failed_video_names = []
 
     with ProcessPoolExecutor(max_workers=worker_count) as executor:
         active_futures = {}
@@ -324,6 +326,7 @@ def generate_contact_sheets(tasks, cancel_event, progress_callback=None):
                     success_count += 1
                 else:
                     failure_count += 1
+                    failed_video_names.append(video_path.name)
                 _report_progress(
                     progress_callback,
                     completed_count,
@@ -346,6 +349,7 @@ def generate_contact_sheets(tasks, cancel_event, progress_callback=None):
         success_count,
         failure_count,
         len(tasks) - completed_count,
+        tuple(failed_video_names),
     )
 
 
@@ -361,19 +365,16 @@ def format_elapsed(seconds):
     return f"{minutes:02d}:{seconds:02d}"
 
 
-def write_generation_report(
-    report_folder,
+def format_generation_summary(
     completed_at,
     elapsed_seconds,
     selected_count,
     result,
     skipped_count=0,
 ):
-    """Write a UTF-8 text report summarizing the completed generation run."""
-    report_path = Path(report_folder) / REPORT_FILENAME
-
+    """Format the completed generation results for display in the app."""
     lines = [
-        "Video Contact Sheet Generation Report",
+        "Generation Summary",
         f"Completed at: {completed_at.isoformat(timespec='seconds')}",
         f"Elapsed time: {format_elapsed(elapsed_seconds)}",
         f"Selected videos: {selected_count}",
@@ -383,5 +384,8 @@ def write_generation_report(
         f"Canceled: {result.canceled_count}",
     ]
 
-    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return report_path
+    if result.failed_video_names:
+        lines.extend(["", "Failed videos:"])
+        lines.extend(f"- {name}" for name in result.failed_video_names)
+
+    return "\n".join(lines)

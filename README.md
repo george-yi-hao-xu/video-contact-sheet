@@ -9,7 +9,7 @@ Generate contact sheet preview images for multiple videos with a simple Windows 
 - Choose exactly where generated images are saved.
 - Track progress and cancel videos that have not started yet.
 - Process up to four videos in parallel.
-- Review a generation report in the selected output folder.
+- Review per-video results and the final summary in the Activity section.
 
 ## Run From Source
 
@@ -18,7 +18,7 @@ py -m pip install -r requirements.txt
 py .\main.py
 ```
 
-Choose the video input and output folder in the app, then select **Generate**. Contact sheets are saved as JPEG files, and `generation_report.txt` contains the run summary.
+Choose the video input and output folder in the app, then select **Generate**. Contact sheets are saved as JPEG files, and the Activity section shows progress and the final run summary.
 
 ## Build the Windows Executable
 

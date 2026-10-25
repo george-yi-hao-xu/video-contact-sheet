@@ -8,8 +8,9 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from .gen_video_sheet import (
     GenerationResult,
+    format_generation_summary,
     generate_contact_sheets,
-    write_generation_report,
+    get_worker_count,
 )
 from .path_util import VIDEO_EXTENSIONS, find_video_paths, plan_output_tasks
 
@@ -274,15 +275,22 @@ class VideoContactSheetApp:
         self.close_requested = False
         self._set_running_state(True)
         self._append_log(f"Starting {len(tasks)} video(s)...")
+        if len(tasks) > 1:
+            worker_count = get_worker_count(len(tasks))
+            self._append_log(f"Using {worker_count} worker processes.")
+        elif tasks:
+            self._append_log("Using sequential processing for one video.")
+        else:
+            self._append_log("No new videos to process.")
 
         worker = threading.Thread(
             target=self._run_generation,
-            args=(tasks, len(videos), skipped_count, output_folder),
+            args=(tasks, len(videos), skipped_count),
             daemon=True,
         )
         worker.start()
 
-    def _run_generation(self, tasks, selected_count, skipped_count, output_folder):
+    def _run_generation(self, tasks, selected_count, skipped_count):
         started_at = perf_counter()
         try:
             result = generate_contact_sheets(
@@ -293,15 +301,14 @@ class VideoContactSheetApp:
                 ),
             )
             completed_at = datetime.now().astimezone()
-            report_path = write_generation_report(
-                output_folder,
+            summary = format_generation_summary(
                 completed_at,
                 perf_counter() - started_at,
                 selected_count,
                 result,
                 skipped_count,
             )
-            self.event_queue.put(("done", result, skipped_count, report_path))
+            self.event_queue.put(("done", result, skipped_count, summary))
         except Exception as exc:
             self.event_queue.put(("fatal", str(exc)))
 
@@ -316,8 +323,8 @@ class VideoContactSheetApp:
                     self.progress_text.set(f"{completed} / {total} completed")
                     self._append_log(message)
                 elif event_type == "done":
-                    _, result, skipped_count, report_path = event
-                    self._finish_run(result, skipped_count, report_path)
+                    _, result, skipped_count, summary = event
+                    self._finish_run(result, skipped_count, summary)
                 elif event_type == "fatal":
                     self._handle_fatal_error(event[1])
         except queue.Empty:
@@ -342,12 +349,15 @@ class VideoContactSheetApp:
             self.progress_text.set("Canceling after active videos finish...")
             self._append_log("Cancellation requested. Active videos will finish safely.")
 
-    def _finish_run(self, result, skipped_count, report_path):
+    def _finish_run(self, result, skipped_count, summary):
         self._set_running_state(False)
         if result.canceled_count:
             self.progress_text.set("Canceled")
         else:
             self.progress_text.set("Complete")
+
+        self._append_log("")
+        self._append_log(summary)
 
         if self.close_requested:
             self.root.destroy()
@@ -359,8 +369,7 @@ class VideoContactSheetApp:
                 f"Succeeded: {result.success_count}\n"
                 f"Failed: {result.failure_count}\n"
                 f"Skipped: {skipped_count}\n"
-                f"Canceled: {result.canceled_count}\n\n"
-                f"Report: {report_path}"
+                f"Canceled: {result.canceled_count}"
             ),
             parent=self.root,
         )
